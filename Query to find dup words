@@ -1,0 +1,201 @@
+WITH
+  dup_keyword_title AS (
+  SELECT
+    id_product,
+    pte.product_title,
+    pte.colour_name,
+    product_full_title,
+    CONCAT(Bnd.name_en,' ', product_full_title) Complete_title,
+    CONCAT(Bnd.name_en,' ', product_full_title) final_title
+  FROM
+    `noondwh.wecat.product_variant` cpv
+  LEFT JOIN
+    `noondwh.wecat.product` cp
+  USING
+    (id_product)
+  LEFT JOIN
+    `noondwh.wecat.product_text_en` pte
+  USING
+    (id_product)
+  LEFT OUTER JOIN
+    `noondwh.wecat_md.brand` Bnd
+  USING
+    (id_brand)
+  WHERE
+    product_full_title IS NOT NULL)
+SELECT
+  * EXCEPT(rownumber)
+FROM (
+  SELECT
+    id_product,
+  IF
+    (rdw.string_field_0 IS NULL,
+      0,
+      1) is_reviewed,
+    product_title,
+    product_full_title,
+    complete_title,
+    a.colour_name,
+    final_title dup_word,
+    c.name_en Brand,
+    d.op_tier,
+    e.family,
+    e.BIG_6 super_family,
+    f.name_en product_type,
+    g.name_en product_subtype,
+  IF
+    (i.name IS NULL,
+      'outside_pulse',
+      i.name) bu_name,
+  IF
+    (j.string_field_0 IS NULL,
+      'outside_pulse',
+      j.string_field_0)parent_bu,
+  IF
+    ( ( (k.updated_by IN ('sohaib.ahamad88@gmail.com',
+            'sahuji094@gmail.com',
+            'udaychouhan10@gmail.com',
+            'Dharmendrasoni560@gmail.com'))
+        OR (k.updated_by LIKE ('%iksula%')) ),
+      "Iksula QC",
+    IF
+      (k.updated_by LIKE ('%noon.com'),
+        "InhouseQC",
+      IF
+        (k.updated_by LIKE ('%netscribes%'),
+          "Netscribe QC",
+        IF
+          (k.updated_by LIKE ('%odn%'),
+            "ODN QC",
+          IF
+            (k.updated_by LIKE ('%infognana%'),
+              "Infognana QC",
+              "Other QC"))))) approved_by,
+  IF
+    (final_title IN ('for',
+        'For',
+        'with',
+        'With',
+        'of',
+        'Of',
+        'and',
+        'And',
+        'to',
+        'To',
+        'in',
+        'In',
+        'on',
+        'On',
+        'the',
+        'The'),
+      'dup_with_Prepositions',
+    IF
+      ( final_title = colour_name,
+        'dup_by_colour',
+      IF
+        (c.name_en LIKE final_title,
+          'dup_by_brand',
+          'dup_by_word'))) dup_type,
+    ROW_NUMBER() OVER(PARTITION BY id_product) AS rownumber
+  FROM (
+    SELECT
+      * REPLACE( ARRAY_TO_STRING(ARRAY(
+          SELECT
+            words
+          FROM
+            UNNEST(SPLIT(final_title, ' ')) AS words
+          GROUP BY
+            1
+          HAVING
+            COUNT(words) > 1), ' ') AS final_title)
+    FROM
+      dup_keyword_title) a
+  LEFT JOIN
+    `noondwh.wecat.product` b
+  USING
+    (id_product)
+  LEFT JOIN
+    `noondwh.wecat_md.brand` c
+  USING
+    (id_brand)
+  LEFT JOIN
+    `noonbiprgcat.my_views.Families` e
+  ON
+    e.Family_ID = b.id_family
+  LEFT JOIN
+    `noondwh.wecat_md.product_type` f
+  USING
+    (id_product_type)
+  LEFT JOIN
+    `noondwh.wecat_md.product_subtype` g
+  USING
+    (id_product_subtype)
+  LEFT JOIN
+    `noonbiprgcat.my_views.OP_Tier` d
+  ON
+    d.id_brand = b.id_brand
+    AND d.id_family = b.id_family
+    AND d.id_product_type = b.id_product_type
+    AND d.id_product_subtype = b.id_product_subtype
+  LEFT JOIN (
+    SELECT
+      id_sku,
+      id_bu last_id_bu
+    FROM (
+      SELECT
+        id_workitem,
+        id_sku,
+        id_bu,
+        ROW_NUMBER() OVER (PARTITION BY id_workitem ORDER BY bu_allocation_date DESC) ROW
+      FROM
+        noondwh.workbench_ticketing.new_wi_summary
+      GROUP BY
+        id_workitem,
+        id_bu,
+        bu_allocation_date,
+        id_sku)
+    WHERE
+      ROW=1) h
+  ON
+    h.id_sku = a.id_product
+  LEFT JOIN
+    `noondwh.workbench_ticketing.business_unit` i
+  ON
+    i.id_bu = h.last_id_bu
+  LEFT JOIN
+    `noonbiprgcat.my_views.parent_bu_mapping` j
+  ON
+    j.string_field_0 = i.name
+  LEFT JOIN (
+    SELECT
+      *
+    FROM (
+      SELECT
+        action,
+        action_key,
+        updated_by,
+        history_time,
+        ROW_NUMBER() OVER (PARTITION BY action_key ORDER BY history_time DESC) ROW
+      FROM
+        `noondwh.wecat.audit_log`
+      WHERE
+        action = 'qc_approve')
+    WHERE
+      ROW = 1) k
+  ON
+    k.action_key = a.id_product
+  LEFT JOIN
+    noonbiprgcat.catalog_views.Titles_Reviewed_Dup_keyword_in_Title rdw
+  ON
+    rdw.string_field_0 = a.id_product
+  WHERE
+    final_title NOT IN ('x',
+      'X',
+      ' x',
+      ' X',
+      '')
+    AND REGEXP_CONTAINS(final_title, r'[^a-zA-Z]') IS FALSE
+    AND status_qc = 1
+    AND c.is_visible = 1)
+WHERE
+  rownumber = 1
