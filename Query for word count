@@ -1,0 +1,1 @@
+coalesce(array_length(regexp_extract_all(phrase, r'[" "]'))+1,0) word_count
